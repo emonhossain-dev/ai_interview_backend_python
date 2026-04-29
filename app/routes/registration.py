@@ -12,6 +12,8 @@ from app.services.google_auth import verify_google_token
 from app.core.limiter import limiter
 from datetime import timedelta
 from app.utils.image_file_name import generate_image_name
+from app.utils.current_user_token_check import get_current_user
+from app.schemas.user import UserCreate,LoginRequest, OTPVerifyRequest, ResetPasswordSchema, OTPVerifySchema,EmailSchema, GoogleLoginSchema, ProfileUpdateSchema, LogoutDeviceSchema
 import uuid
 import shutil
 import os
@@ -30,7 +32,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # -------------------------
 # REGISTER USER
 # -------------------------
-@router.post("/")
+@router.post("/register")
 def register(
     email: str = Form(...),
     password: str = Form(...),
@@ -99,9 +101,11 @@ def register(
 # VERIFY OTP
 # -------------------------
 @router.post("/verify-otp")
-def verify_otp(email: str, code: str, db: Session = Depends(get_db)):
-
-    user = db.query(User).filter(User.email == email).first()
+def verify_otp(
+    data: OTPVerifyRequest,
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.email == data.email).first()
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -116,11 +120,11 @@ def verify_otp(email: str, code: str, db: Session = Depends(get_db)):
     if not otp:
         raise HTTPException(status_code=400, detail="OTP not found")
 
-    # 🔥 HERE IS YOUR LINE (STEP 2 FIX)
+    # expiry check
     if otp.expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="OTP expired")
 
-    if otp.code != code:
+    if otp.code != data.code:
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
     user.is_verified = True
@@ -132,9 +136,12 @@ def verify_otp(email: str, code: str, db: Session = Depends(get_db)):
 
 # ---------------- GOOGLE LOGIN ----------------
 @router.post("/google")
-def google_login(id_token: str, device_id: str = None, db: Session = Depends(get_db)):
-
-    user_info = verify_google_token(id_token)
+def google_login(
+    user_info: GoogleLoginSchema,
+    db: Session = Depends(get_db)
+):
+    id_token = user_info.id_token
+    device_id = user_info.device_id
 
     if not user_info:
         raise HTTPException(status_code=400, detail="Invalid Google token")
@@ -202,12 +209,14 @@ def google_login(id_token: str, device_id: str = None, db: Session = Depends(get
 @limiter.limit("5/minute")
 def login(
     request: Request,
-    email: str,
-    password: str,
-    device_id: str = None,
+    data: LoginRequest,
     db: Session = Depends(get_db)
 ):
+    email = data.email
+    password = data.password
+    device_id = data.device_id
 
+    # ---------------- USER FETCH ----------------
     user = db.query(User).filter(User.email == email).first()
 
     if not user:
@@ -235,7 +244,7 @@ def login(
 
         raise HTTPException(status_code=400, detail="Invalid password")
 
-    # ---------------- SUCCESS RESET ----------------
+    # ---------------- SUCCESS LOGIN RESET ----------------
     user.failed_attempts = 0
     user.is_locked = False
     user.lock_until = None
@@ -277,61 +286,45 @@ def login(
 
 @router.put("/profile/update")
 def update_profile(
-    user_id: int,
-    email: str = None,
-    name: str = None,
-    mobile: str = None,   # ✅ ADD THIS
-    current_password: str = None,
-    new_password: str = None,
-    db: Session = Depends(get_db)
+    data: ProfileUpdateSchema,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
 ):
 
-    # ---------------- FIND USER ----------------
-    user = db.query(User).filter(User.id == user_id).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     # ---------------- EMAIL UPDATE ----------------
-    if email:
-        existing = db.query(User).filter(User.email == email).first()
+    if data.email:
+        existing = db.query(User).filter(User.email == data.email).first()
 
         if existing and existing.id != user.id:
             raise HTTPException(status_code=400, detail="Email already taken")
 
-        user.email = email
+        user.email = data.email
 
     # ---------------- NAME UPDATE ----------------
-    if name:
-        user.name = name
+    if data.name:
+        user.name = data.name
 
-    # ---------------- MOBILE UPDATE (NEW) ----------------
-    if mobile:
-        existing_mobile = db.query(User).filter(User.mobile == mobile).first()
+    # ---------------- MOBILE UPDATE ----------------
+    if data.mobile:
+        existing_mobile = db.query(User).filter(User.mobile == data.mobile).first()
 
         if existing_mobile and existing_mobile.id != user.id:
             raise HTTPException(status_code=400, detail="Mobile already taken")
 
-        user.mobile = mobile
+        user.mobile = data.mobile
 
     # ---------------- PASSWORD CHANGE ----------------
-    if new_password:
+    if data.new_password:
 
-        if not current_password:
-            raise HTTPException(
-                status_code=400,
-                detail="Current password required"
-            )
+        if not data.current_password:
+            raise HTTPException(status_code=400, detail="Current password required")
 
-        if not verify_password(current_password, user.hashed_password):
-            raise HTTPException(
-                status_code=400,
-                detail="Current password is wrong"
-            )
+        if not verify_password(data.current_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Current password is wrong")
 
-        user.hashed_password = hash_password(new_password)
+        user.hashed_password = hash_password(data.new_password)
 
-    # ---------------- UPDATE TIME ----------------
+    # ---------------- UPDATED TIME ----------------
     user.updated_at = datetime.now(timezone.utc)
 
     db.commit()
@@ -342,31 +335,27 @@ def update_profile(
         "user": {
             "id": user.id,
             "email": user.email,
-            "name": getattr(user, "name", None),
-            "mobile": user.mobile
+            "name": user.name,
+            "mobile": user.mobile,
+            "profile_pic": user.profile_pic
         }
     }
 
 
+# ---------------- PROFILE IMAGE UPLOAD ----------------
 @router.put("/profile/upload-photo")
 def upload_profile_pic(
-    user_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)   # 🔥 TOKEN USER
 ):
 
-    user = db.query(User).filter(User.id == user_id).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     # ---------------- VALIDATION ----------------
-    if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
+    if image.content_type not in ["image/jpeg", "image/png", "image/webp"]:
         raise HTTPException(status_code=400, detail="Invalid image format")
 
     # ---------------- FILE NAME ----------------
-    ext = file.filename.split(".")[-1]
-
+    ext = image.filename.split(".")[-1]
     filename = generate_image_name(user.email, ext)
 
     upload_dir = "uploads/profile_pics"
@@ -376,7 +365,7 @@ def upload_profile_pic(
 
     # ---------------- SAVE FILE ----------------
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        shutil.copyfileobj(image.file, buffer)
 
     # ---------------- SAVE DB ----------------
     user.profile_pic = file_path
@@ -391,19 +380,11 @@ def upload_profile_pic(
     }
 
 
-
-@router.get("/profile/{user_id}")
+# ---------------- GET PROFILE ----------------
+@router.get("/profile")
 def get_profile(
-    user_id: int,
-    db: Session = Depends(get_db)
+    user: User = Depends(get_current_user)
 ):
-
-    # ---------------- FIND USER ----------------
-    user = db.query(User).filter(User.id == user_id).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     return {
         "message": "Profile fetched successfully",
         "user": {
@@ -413,7 +394,7 @@ def get_profile(
             "mobile": user.mobile,
             "is_verified": user.is_verified,
             "auth_provider": user.auth_provider,
-            "profile_pic": user.profile_pic,   # 👈 image path
+            "profile_pic": user.profile_pic,
             "created_at": user.created_at,
             "updated_at": user.updated_at
         }
@@ -423,14 +404,13 @@ def get_profile(
 
 @router.post("/logout-device")
 def logout_device(
-    device_id: str,
-    refresh_token: str,
+    data: LogoutDeviceSchema,
     db: Session = Depends(get_db)
 ):
 
     token = db.query(RefreshToken).filter(
-        RefreshToken.token == refresh_token,
-        RefreshToken.device_id == device_id   # 🔥 IMPORTANT
+        RefreshToken.token == data.refresh_token,
+        RefreshToken.device_id == data.device_id
     ).first()
 
     if not token:
@@ -441,9 +421,9 @@ def logout_device(
 
     return {"message": "Device logged out successfully"}
 
-
 @router.post("/forgot-password")
-def forgot_password(email: str, db: Session = Depends(get_db)):
+def forgot_password(data: EmailSchema, db: Session = Depends(get_db)):
+    email = data.email
 
     user = db.query(User).filter(User.email == email).first()
 
@@ -469,7 +449,9 @@ def forgot_password(email: str, db: Session = Depends(get_db)):
 
 
 @router.post("/reset-password/verify-otp")
-def verify_reset_otp(email: str, code: str, db: Session = Depends(get_db)):
+def verify_reset_otp(data: OTPVerifySchema, db: Session = Depends(get_db)):
+    email = data.email
+    code = data.code
 
     user = db.query(User).filter(User.email == email).first()
 
@@ -504,12 +486,10 @@ def verify_reset_otp(email: str, code: str, db: Session = Depends(get_db)):
     }
 
 @router.post("/reset-password")
-def reset_password(
-    email: str,
-    reset_token: str,
-    new_password: str,
-    db: Session = Depends(get_db)
-):
+def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
+    email = data.email
+    reset_token = data.reset_token
+    new_password = data.new_password
 
     user = db.query(User).filter(User.email == email).first()
 
