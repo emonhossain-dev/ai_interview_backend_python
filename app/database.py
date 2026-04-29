@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
 
-engine = create_engine('postgresql://postgres:Emon@5575.Emon@5575@db.oyihsksvdimhncqfhndq.supabase.co:5432/postgres')
+engine = create_engine('postgresql://neondb_owner:npg_KqyMcS5Ck8dG@ep-wild-waterfall-amwyo8bf-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require')
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
