@@ -13,7 +13,7 @@ from app.core.limiter import limiter
 from datetime import timedelta
 from app.utils.image_file_name import generate_image_name
 from app.utils.current_user_token_check import get_current_user
-from app.schemas.user import UserCreate,LoginRequest, OTPVerifyRequest, ResetPasswordSchema, OTPVerifySchema,EmailSchema, GoogleLoginSchema, ProfileUpdateSchema, LogoutDeviceSchema
+from app.schemas.user import UserCreate,LoginRequest, OTPVerifyRequest, ResetPasswordSchema, OTPVerifySchema,EmailSchema, GoogleLoginSchema, ProfileUpdateSchema, LogoutDeviceSchema, RefreshRequest
 import uuid
 import shutil
 import os
@@ -520,6 +520,49 @@ def reset_password(data: ResetPasswordSchema, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Password reset successful"}
+
+
+@router.post("/refresh-token")
+def refresh_token(
+    request: RefreshRequest,
+    db: Session = Depends(get_db)
+):
+
+    data = request.json()
+    refresh_token = data.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Refresh token missing")
+
+    # ---------------- FIND TOKEN IN DB ----------------
+    db_token = db.query(RefreshToken).filter(
+        RefreshToken.token == refresh_token,
+        RefreshToken.is_revoked == False
+    ).first()
+
+    if not db_token:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    # ---------------- CHECK EXPIRY ----------------
+    if db_token.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+
+    # ---------------- GET USER ----------------
+    user = db_token.user
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ---------------- CREATE NEW ACCESS TOKEN ----------------
+    new_access_token = create_access_token(
+        data={"sub": str(user.id), "email": user.email}
+    )
+
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer"
+    }
+
 
 
 

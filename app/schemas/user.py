@@ -55,3 +55,8 @@ class ProfileUpdateSchema(BaseModel):
 class LogoutDeviceSchema(BaseModel):
     device_id: str
     refresh_token: str
+
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
