@@ -9,6 +9,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 from app.core.limiter import limiter
 from app.database import get_db, SessionLocal
+from fastapi.staticfiles import StaticFiles
 
 
 load_dotenv()
@@ -25,6 +26,7 @@ app.include_router(interview_router, prefix="/interview")
 
 app.include_router(registration_router, prefix="/auth")
 #app.include_router(interview_socket_router)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/")
