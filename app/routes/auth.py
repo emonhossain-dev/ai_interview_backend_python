@@ -17,7 +17,7 @@ from app.schemas.user import UserCreate,LoginRequest, OTPVerifyRequest, ResetPas
 import uuid
 import shutil
 import os
-
+from app.models.resumes import Resume
 
 
 router = APIRouter()
@@ -38,6 +38,7 @@ def register(
     password: str = Form(...),
     name: str = Form(None),
     mobile: str = Form(None),
+    current_position: str = Form(None),
     image: UploadFile = File(None),
     db: Session = Depends(get_db)
 ):
@@ -69,7 +70,8 @@ def register(
         mobile=mobile,
         profile_pic=image_path,
         is_verified=False,
-        auth_provider="email"
+        auth_provider="email",
+        current_position=current_position  # ✅ FIX
     )
 
 
@@ -383,8 +385,11 @@ def upload_profile_pic(
 # ---------------- GET PROFILE ----------------
 @router.get("/profile")
 def get_profile(
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    resume = db.query(Resume).filter(Resume.user_id == user.id).first()
+
     return {
         "message": "Profile fetched successfully",
         "user": {
@@ -392,12 +397,20 @@ def get_profile(
             "email": user.email,
             "name": user.name,
             "mobile": user.mobile,
+            "current_position": user.current_position,
             "is_verified": user.is_verified,
             "auth_provider": user.auth_provider,
             "profile_pic": user.profile_pic,
             "created_at": user.created_at,
             "updated_at": user.updated_at
-        }
+        },
+        "resume": {
+            "id": resume.id if resume else None,
+            "title": resume.title if resume else None,
+            "summary": resume.summary if resume else None,
+            "file_url": resume.file_url if resume else None,
+            "created_at": resume.created_at if resume else None
+        } if resume else None
     }
 
 
@@ -419,7 +432,7 @@ def logout_device(
     token.is_revoked = True
     db.commit()
 
-    return {"message": "Device logged out successfully"}
+    return {"message": "Logged out successfully"}
 
 @router.post("/forgot-password")
 def forgot_password(data: EmailSchema, db: Session = Depends(get_db)):
@@ -527,9 +540,7 @@ def refresh_token(
     request: RefreshRequest,
     db: Session = Depends(get_db)
 ):
-
-    data = request.json()
-    refresh_token = data.get("refresh_token")
+    refresh_token = request.refresh_token   # ✅ direct access
 
     if not refresh_token:
         raise HTTPException(status_code=400, detail="Refresh token missing")
@@ -544,7 +555,7 @@ def refresh_token(
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     # ---------------- CHECK EXPIRY ----------------
-    if db_token.expires_at < datetime.now(timezone.utc):
+    if db_token.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="Refresh token expired")
 
     # ---------------- GET USER ----------------

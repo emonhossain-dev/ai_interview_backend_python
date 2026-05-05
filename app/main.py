@@ -10,20 +10,33 @@ from slowapi import _rate_limit_exceeded_handler
 from app.core.limiter import limiter
 from app.database import get_db, SessionLocal
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes.resume import router as resume_router
+
+
 
 
 load_dotenv()
-print("GROQ:", os.getenv("GROQ_API_KEY"))
+print("GROQ:", os.getenv("GEMINI_API_KEY"))
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.include_router(registration_router, prefix="/auth")
 app.include_router(interview_socket_router)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.include_router(resume_router)
 
 
 @app.get("/")

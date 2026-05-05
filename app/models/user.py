@@ -11,6 +11,7 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     mobile = Column(String, nullable=False)
+    current_position = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True)
 
     is_verified = Column(Boolean, default=False)
@@ -26,10 +27,13 @@ class User(Base):
 
     profile_pic = Column(String, nullable=True)
 
-
-    created_at = Column(DateTime, default=datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=datetime.utcnow)
-
+    resumes = relationship("Resume", back_populates="user", cascade="all, delete-orphan")
 
 
     otp = relationship("OTP", back_populates="user", uselist=False)
+
+    # ✅ NEW: refresh token relation
+    refresh_tokens = relationship("RefreshToken", back_populates="user")
+
+    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=datetime.utcnow)

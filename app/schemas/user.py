@@ -7,6 +7,7 @@ class UserCreate(BaseModel):
     password: str
     name: str
     mobile: Optional[str] = None
+    current_position: Optional[str] = None
 
 # ✅ Request Schema (JSON Body)
 class LoginRequest(BaseModel):
