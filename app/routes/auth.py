@@ -39,7 +39,7 @@ def register(
     name: str = Form(None),
     mobile: str = Form(None),
     current_position: str = Form(None),
-    image: UploadFile = File(None),
+    image: UploadFile | None = File(None),
     db: Session = Depends(get_db)
 ):
 

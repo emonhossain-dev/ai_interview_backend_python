@@ -1,0 +1,15 @@
+import os
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+def get_ai_response(messages: list) -> str:
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",  # ✅ নতুন model
+        messages=messages,
+        max_tokens=1024,
+    )
+    return response.choices[0].message.content
