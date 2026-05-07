@@ -13,7 +13,10 @@ def get_chat(db, chat_id, user_id):
         Chat.user_id == str(user_id)
     ).first()
 
-def get_user_chats(db, user_id):
-    return db.query(Chat).filter(
+def get_user_chats(db, user_id, page: int = 1, limit: int = 20):  # ← pagination add
+    offset = (page - 1) * limit
+    total = db.query(Chat).filter(Chat.user_id == str(user_id)).count()
+    chats = db.query(Chat).filter(
         Chat.user_id == str(user_id)
-    ).order_by(Chat.created_at.desc()).all()
+    ).order_by(Chat.created_at.desc()).offset(offset).limit(limit).all()
+    return chats, total

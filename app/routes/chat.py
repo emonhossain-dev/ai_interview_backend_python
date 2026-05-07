@@ -8,16 +8,27 @@ router = APIRouter(prefix="/api/chats", tags=["Chats"])
 
 # ── সব chat list ──────────────────────────────
 @router.get("/{user_id}")
-def list_chats(user_id: str, db: Session = Depends(get_db)):
-    chats = get_user_chats(db, user_id)
-    return [
-        {
-            "chat_id": chat.id,
-            "title": chat.title,
-            "created_at": chat.created_at.isoformat() if chat.created_at else None,
-        }
-        for chat in chats
-    ]
+def list_chats(
+    user_id: str,
+    page: int = 1,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    chats, total = get_user_chats(db, user_id, page, limit)
+    return {
+        "chats": [
+            {
+                "chat_id": chat.id,
+                "title": chat.title,
+                "created_at": chat.created_at.isoformat() if chat.created_at else None,
+            }
+            for chat in chats
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": (page * limit) < total,
+    }
 
 # ── নির্দিষ্ট chat এর messages ────────────────
 @router.get("/{user_id}/{chat_id}/messages")
