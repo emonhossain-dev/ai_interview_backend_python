@@ -15,6 +15,9 @@ from app.routes.resume import router as resume_router
 from app.websocket.chat_socket import chat_websocket
 from app.models import chat, message
 from app.routes.chat import router as chat_router
+from app.websocket.interview_socket import interview_websocket
+from app.routes.history import router as history_router
+from app.routes.tts_router import router as tts_router
 
 
 
@@ -43,12 +46,20 @@ app.include_router(registration_router, prefix="/auth")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.include_router(resume_router)
 app.include_router(chat_router)
+app.include_router(history_router)
+app.include_router(tts_router)
 
 
 # existing code এর নিচে add করো
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
     await chat_websocket(websocket)
+
+
+# Interview WebSocket route
+@app.websocket("/ws/interview")
+async def interview_ws_route(websocket: WebSocket):
+    await interview_websocket(websocket)
 
 @app.get("/")
 def root():

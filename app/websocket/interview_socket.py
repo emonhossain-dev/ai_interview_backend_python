@@ -1,115 +1,89 @@
-# from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-# from app.services.ai_engine import get_ai_response, get_ai_response_chat
-#
-# router = APIRouter()
-#
-#
-# # =========================
-# # Connection Manager
-# # =========================
-# class ConnectionManager:
-#     def __init__(self):
-#         self.active_connections = {}
-#
-#     async def connect(self, websocket: WebSocket, user_id: str):
-#         self.active_connections[user_id] = websocket
-#
-#     def disconnect(self, user_id: str):
-#         self.active_connections.pop(user_id, None)
-#
-#     async def send(self, user_id: str, message: dict):
-#         ws = self.active_connections.get(user_id)
-#         if ws:
-#             await ws.send_json(message)
-#
-#
-# manager = ConnectionManager()
-#
-#
-# # =========================
-# # 1. INTERVIEW WEBSOCKET (UNCHANGED)
-# # =========================
-# @router.websocket("/ws/interview")
-# async def interview_socket(websocket: WebSocket):
-#     await websocket.accept()
-#
-#     user_id = None
-#
-#     try:
-#         init_data = await websocket.receive_json()
-#
-#         user_id = init_data.get("user_id")
-#         role = init_data.get("role", "software engineer")
-#
-#         await manager.connect(websocket, user_id)
-#
-#         await manager.send(user_id, {
-#             "type": "system",
-#             "message": "Interview started"
-#         })
-#
-#         while True:
-#             data = await websocket.receive_json()
-#             user_message = data.get("message")
-#
-#             ai_reply = await get_ai_response(user_message, role)
-#
-#             await manager.send(user_id, {
-#                 "type": "ai",
-#                 "message": ai_reply
-#             })
-#
-#     except WebSocketDisconnect:
-#         if user_id:
-#             manager.disconnect(user_id)
-#
-#
-# # =========================
-# # 2. NORMAL CHAT WEBSOCKET (SIMPLE)
-# # =========================
-# @router.websocket("/ws/chat")
-# async def chat_socket(websocket: WebSocket):
-#     await websocket.accept()
-#
-#     user_id = None
-#
-#     try:
-#         init_data = await websocket.receive_json()
-#         user_id = init_data.get("user_id")
-#
-#         if not user_id:
-#             await websocket.close(code=1008)
-#             return
-#
-#         await manager.connect(websocket, user_id)
-#
-#         # ❌ NO SYSTEM MESSAGE HERE (silent connect)
-#
-#         while True:
-#             try:
-#                 data = await websocket.receive_json()
-#                 user_message = data.get("message")
-#
-#                 if not user_message:
-#                     continue
-#
-#                 ai_reply = await get_ai_response_chat(user_message)
-#
-#                 await manager.send(user_id, {
-#                     "type": "ai",
-#                     "message": ai_reply
-#                 })
-#
-#             except WebSocketDisconnect:
-#                 print("Client disconnected inside loop")
-#                 break
-#
-#     except WebSocketDisconnect:
-#         print("Client disconnected before init")
-#
-#     except Exception as e:
-#         print("WebSocket crash:", e)
-#
-#     finally:
-#         if user_id:
-#             manager.disconnect(user_id)
+from fastapi import WebSocket, WebSocketDisconnect
+from app.database import SessionLocal
+from app.services.interview_service import start_interview, handle_interview
+import json
+import traceback
+import uuid
+
+async def interview_websocket(websocket: WebSocket):
+    await websocket.accept()
+    print("✅ Interview WebSocket Connected")
+
+    while True:
+        try:
+            raw = await websocket.receive_text()
+            print("📩 Received:", raw)
+
+            try:
+                data = json.loads(raw)
+            except Exception:
+                await websocket.send_text(json.dumps({"error": "Invalid JSON"}))
+                continue
+
+            user_id    = data.get("user_id")
+            action     = data.get("action")   # "start" | "answer"
+            session_id = data.get("session_id")
+            message    = data.get("message")
+
+            # ── Validation ──
+            if not user_id:
+                await websocket.send_text(json.dumps({"error": "user_id required"}))
+                continue
+
+            if action not in ("start", "answer"):
+                await websocket.send_text(json.dumps({"error": "action must be 'start' or 'answer'"}))
+                continue
+
+            if action == "answer" and not session_id:
+                await websocket.send_text(json.dumps({"error": "session_id required for action=answer"}))
+                continue
+
+            if action == "answer" and not message:
+                await websocket.send_text(json.dumps({"error": "message required for action=answer"}))
+                continue
+
+            # ── DB ──
+            db = SessionLocal()
+            try:
+                if action == "start":
+                    # নতুন session শুরু
+                    category   = data.get("category", "General")
+                    topics     = data.get("topics", [])
+                    difficulty = data.get("difficulty", "Medium")
+
+                    if not topics:
+                        await websocket.send_text(json.dumps({"error": "topics required"}))
+                        db.close()
+                        continue
+
+                    result = start_interview(db, user_id, category, topics, difficulty)
+
+                elif action == "answer":
+                    # User এর answer process করো
+                    result = handle_interview(db, user_id, session_id, message)
+
+                await websocket.send_text(json.dumps(serialize_result(result)))
+                print("✅ Done:", result)
+
+            except Exception as e:
+                traceback.print_exc()
+                db.rollback()
+                await websocket.send_text(json.dumps({"error": str(e)}))
+            finally:
+                db.close()
+
+        except WebSocketDisconnect:
+            print("🔌 Interview WebSocket Disconnected")
+            break
+        except Exception as e:
+            traceback.print_exc()
+            break
+
+
+
+# এই helper function add করো file এর উপরে
+def serialize_result(result: dict) -> dict:
+    return {
+        k: str(v) if isinstance(v, uuid.UUID) else v
+        for k, v in result.items()
+    }
