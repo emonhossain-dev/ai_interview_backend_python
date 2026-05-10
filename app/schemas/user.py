@@ -40,7 +40,11 @@ class ResetPasswordSchema(BaseModel):
 
 class GoogleLoginSchema(BaseModel):
     id_token: str
-    device_id: Optional[str] = None
+    device_id: str
+    # Google token থেকে frontend পাঠাবে
+    email: str
+    name: Optional[str] = None
+    profile_pic: Optional[str] = None
 
 
 

@@ -18,6 +18,7 @@ from app.routes.chat import router as chat_router
 from app.websocket.interview_socket import interview_websocket
 from app.routes.history import router as history_router
 from app.routes.tts_router import router as tts_router
+from app.routes.subscription import router as subscription_router
 
 
 
@@ -48,6 +49,7 @@ app.include_router(resume_router)
 app.include_router(chat_router)
 app.include_router(history_router)
 app.include_router(tts_router)
+app.include_router(subscription_router, prefix="/subscription", tags=["Subscription"])
 
 
 # existing code এর নিচে add করো

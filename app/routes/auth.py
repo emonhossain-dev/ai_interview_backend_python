@@ -142,57 +142,59 @@ def google_login(
     user_info: GoogleLoginSchema,
     db: Session = Depends(get_db)
 ):
-    id_token = user_info.id_token
-    device_id = user_info.device_id
-
-    if not user_info:
-        raise HTTPException(status_code=400, detail="Invalid Google token")
-
-    email = user_info["email"]
-
-    if not email:
+    if not user_info.email:
         raise HTTPException(status_code=400, detail="Email not found")
+
+    email      = user_info.email
+    name       = user_info.name or email.split("@")[0]   # fallback নাম
+    profile_pic = user_info.profile_pic
+    device_id  = user_info.device_id
 
     user = db.query(User).filter(User.email == email).first()
 
     if not user:
+        # নতুন user — Google থেকে পাওয়া সব data save করুন
         user = User(
-            email=email,
-            hashed_password=None,
-            is_verified=True,
-            auth_provider="google",
-            created_at=datetime.now(timezone.utc)
+            email           = email,
+            name            = name,               # Google থেকে নেওয়া
+            mobile          = "",                  # nullable=False, তাই empty string
+            profile_pic     = profile_pic,         # Google থেকে নেওয়া
+            hashed_password = None,
+            is_verified     = True,
+            auth_provider   = "google",
+            created_at      = datetime.now(timezone.utc)
         )
         db.add(user)
         db.commit()
         db.refresh(user)
     else:
+        # পুরনো user — Google থেকে আসা নতুন data update করুন
+        if name and not user.name:
+            user.name = name
+        if profile_pic and not user.profile_pic:
+            user.profile_pic = profile_pic          # শুধু না থাকলে update
         user.last_login = datetime.now(timezone.utc)
         db.commit()
 
-    # -------------------------
-    # TOKENS
-    # -------------------------
+    # Tokens তৈরি
     access_token = create_access_token(
         data={"sub": str(user.id), "email": user.email}
     )
-
     refresh_token = create_refresh_token(
         data={"sub": str(user.id)}
     )
 
-    # -------------------------
-    # SAVE REFRESH TOKEN (NEW)
-    # -------------------------
+    # Refresh token save
     db_token = RefreshToken(
-        token=refresh_token,
-        user_id=user.id,
-        device_id=device_id,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=7)
+        token      = refresh_token,
+        user_id    = user.id,
+        device_id  = device_id,
+        expires_at = datetime.now(timezone.utc) + timedelta(days=7)
     )
-
     db.add(db_token)
     db.commit()
+
+    resume = db.query(Resume).filter(Resume.user_id == user.id).first()
 
     return {
         "access_token": access_token,
@@ -200,8 +202,23 @@ def google_login(
         "token_type": "bearer",
         "user": {
             "id": user.id,
-            "email": user.email
-        }
+            "email": user.email,
+            "name": user.name,
+            "mobile": user.mobile,
+            "current_position": user.current_position,
+            "is_verified": user.is_verified,
+            "auth_provider": user.auth_provider,
+            "profile_pic": user.profile_pic,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        },
+        "resume": {
+            "id": str(resume.id),
+            "title": resume.title,
+            "summary": resume.summary,
+            "file_url": resume.file_url,
+            "created_at": resume.created_at.isoformat() if resume.created_at else None,
+        } if resume else None,
     }
 
 
@@ -273,14 +290,31 @@ def login(
     db.add(db_token)
     db.commit()
 
+    resume = db.query(Resume).filter(Resume.user_id == user.id).first()
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
-            "email": user.email
-        }
+            "email": user.email,
+            "name": user.name,
+            "mobile": user.mobile,
+            "current_position": user.current_position,
+            "is_verified": user.is_verified,
+            "auth_provider": user.auth_provider,
+            "profile_pic": user.profile_pic,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        },
+        "resume": {
+            "id": str(resume.id),
+            "title": resume.title,
+            "summary": resume.summary,
+            "file_url": resume.file_url,
+            "created_at": resume.created_at.isoformat() if resume.created_at else None,
+        } if resume else None,
     }
 
 
